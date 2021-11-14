@@ -1,0 +1,566 @@
+''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'Converts MGRS grid reference to UTM coordinate to Lat Long (decimal degrees)
+'   Could still use some prettifying
+'Transcribed from here: http://www.movable-type.co.uk/scripts/latlong-utm-mgrs.html  /  https://github.com/chrisveness/geodesy
+
+
+
+
+'There are 6 functions:
+' MGRS2UTM
+' UTM2LL
+' MGRS2LL
+' LL2UTM
+' UTM2MGRS
+' MGRS2LL
+'
+' For what is returned and expected as arguments, an array of numbers/letters is expected:
+'    MGRS example: Array(31, "U", "D", "Q", 48251, 11932)
+'    UTM example: Array(31, 'N', 448251, 5411932))
+'    LatLong example: Array(48.8582, 2.2945)
+
+
+'Translate MGRS to Lat Long (Decimal degrees)
+Function MGRS2LL(mgrs)
+
+    UTM = MGRS2UTM(mgrs)
+    LL = UTM2LL(UTM)
+
+    MGRS2LL = LL
+
+End Function
+
+'Translate Lat Long (Decimal degrees) to MGRS
+Function LL2MGRS(LL)
+
+    UTM = LL2UTM(mgrs)
+    mgrs = UTM2MGRS(UTM)
+
+    LL2MGRS = mgrs
+
+End Function
+
+
+
+
+
+
+
+
+
+
+
+''''''''''''''''''''''''''''''''''''''''''''''''''''''
+'Converts MGRS grid reference to UTM coordinate.
+'Transcribed from here: http://www.movable-type.co.uk/scripts/latlong-utm-mgrs.html  /  https://github.com/chrisveness/geodesy
+
+
+' Latitude bands C..X 8° each, covering 80°S to 84°N
+Public Const mgrs_latBands As String = "CDEFGHJKLMNPQRSTUVWXX" ' X is repeated for 80-84°N
+Const PI = 3.14159265358979
+
+Function MGRS2UTM(MGRScoords)
+
+    mgrs_e100kLetters = Array("ABCDEFGH", "JKLMNPQ", "STUVWXYZ")
+    mgrs_n100kLetters = Array("ABCDEFGHJKLMNPQRSTUV", "FGHJKLMNPQRSTUVABCDE")
+
+    zone = MGRScoords(0)
+    band = MGRScoords(1)
+    e100k = MGRScoords(2)
+    n100k = MGRScoords(3)
+    easting = MGRScoords(4)
+    northing = MGRScoords(5)
+
+    hemisphere = getHemisphere(band)
+
+    'get easting specified by e100k
+    col = InStr(mgrs_e100kLetters((zone - 1) Mod 3), e100k)
+    e100kNum = col * 100000# ' e100k in metres
+
+    'get northing specified by n100k
+    row = InStr(mgrs_n100kLetters((zone - 1) Mod 2), n100k) - 1
+    n100kNum = row * 100000# 'n100k in metres
+
+    'get latitude of (bottom of) band
+    latBand = (InStr(mgrs_latBands, band) - 11) * 8
+
+    'This part does the whole LL2UTM process to get the the band
+    'northing in meteres from bottom of band, extended to include entirety of bottommost 100km square
+    '   (100km square boundaries are aligned with 100km UTM northing intervals)
+    nBand = Int(LL2UTM(Array(latBand, 0))(3) / 100000#) * 100000#
+    '100km grid square row letters repeat every 2,000km north; add enough 2,000km blocks to get
+    '   into required band
+
+    'Pretty sure this can be done with just a modulo, but eh
+    n2M = 0 ' northing of 2,000km block
+    Do While (n2M + n100kNum + northing < nBand)
+        n2M = n2M + 2000000#
+    Loop
+
+    MGRS2UTM = Array(zone, hemisphere, e100kNum + easting, n2M + n100kNum + northing)
+
+End Function
+
+
+
+'returns 'N' or 'S' for the hemisphere the UTM/MGRS latzone is in
+Function getHemisphere(latZone)
+    southernHemisphere = "ACDEFGHJKLM"
+    hemisphere = "N"
+    If (InStr(southernHemisphere, latZone) > 0) Then
+        hemisphere = "S"
+    End If
+
+    getHemisphere = hemisphere
+End Function
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+'Converts UTM coordinates to LatLong coordinates.
+'Transcribed from here: http://www.movable-type.co.uk/scripts/latlong-utm-mgrs.html  /  https://github.com/chrisveness/geodesy
+
+
+
+
+
+
+
+
+'''''''''''''''''''''''''''''''''''''''
+' Converts UTM zone/easting/northing coordinate to latitude/longitude
+'
+' @param   {Utm}    utmCoord - UTM coordinate to be converted to latitude/longitude.
+' @returns {Lat, Lon} Latitude/longitude of supplied grid reference
+'
+' @example
+'    grid = new Utm(31, 'N', 448251.795, 5411932.678)
+'    latlong = grid.toLatLonE()
+Function UTM2LL(utmCoords)
+
+     Z = utmCoords(0) 'longitude zone
+     h = utmCoords(1) 'hemisphere
+     X = utmCoords(2)
+     y = utmCoords(3)
+
+     falseEasting = 500000#
+     falseNorthing = 10000000#
+
+    ' WGS 84:  a = 6378137, b = 6356752.314245, f = 1/298.257223563
+     a = 6378137
+     f = 1 / 298.257223563
+
+     k0 = 0.9996 ' UTM scale on the central meridian
+
+    X = X - falseEasting          ' make x +- relative to central meridian
+    If h = "S" Then               ' make y +- relative to equator
+        y = y - falseNorthing
+    End If
+
+
+    ' ---- from Karney 2011 Eq 15-22, 36:
+
+     e = Math.Sqr(f * (2 - f)) ' eccentricity
+     n = f / (2 - f)        ' 3rd flattening
+     n2 = n * n
+     n3 = n * n2
+     n4 = n * n3
+     n5 = n * n4
+     n6 = n * n5
+
+     a_ = a / (1 + n) * (1 + 1 / 4 * n2 + 1 / 64 * n4 + 1 / 256 * n6) ' 2pA is the circumference of a meridian
+
+     eta = X / (k0 * a_)
+     xi = y / (k0 * a_)
+
+    beta1 = 1 / 2 * n - 2 / 3 * n2 + 37 / 96 * n3 - 1 / 360 * n4 - 81 / 512 * n5 + 96199 / 604800 * n6
+    beta2 = 1 / 48 * n2 + 1 / 15 * n3 - 437 / 1440 * n4 + 46 / 105 * n5 - 1118711 / 3870720 * n6
+    beta3 = 17 / 480 * n3 - 37 / 840 * n4 - 209 / 4480 * n5 + 5569 / 90720 * n6
+    beta4 = 4397 / 161280 * n4 - 11 / 504 * n5 - 830251 / 7257600 * n6
+    beta5 = 4583 / 161280 * n5 - 108847 / 3991680 * n6
+    beta6 = 20648693 / 638668800 * n6
+    beta = Array(Nothing, beta1, beta2, beta3, beta4, beta5, beta6) ' note beta is one-based array (6th order Krüger expressions)
+
+    xiP = xi
+    For j = 1 To 6
+        xiP = xiP - (beta(j) * Sin(2 * j * xi) * CosH(2 * j * eta))
+    Next j
+
+
+    etaP = eta
+    For j = 1 To 6
+        etaP = etaP - (beta(j) * Cos(2 * j * xi) * SinH(2 * j * eta))
+    Next j
+
+     sinhetaP = SinH(etaP)
+     sinxiP = Sin(xiP)
+     cosxiP = Cos(xiP)
+
+     tauP = sinxiP / Math.Sqr(sinhetaP * sinhetaP + cosxiP * cosxiP)
+
+     taui = tauP
+
+     Do While True
+        sigmai = SinH(e * aTanH(e * taui / Math.Sqr(1 + taui * taui)))
+        tauiP = taui * Math.Sqr(1 + sigmai * sigmai) - sigmai * Math.Sqr(1 + taui * taui)
+        deltataui = (tauP - tauiP) / Math.Sqr(1 + tauiP * tauiP) * (1 + (1 - e * e) * taui * taui) / ((1 - e * e) * Math.Sqr(1 + taui * taui))
+        taui = taui + deltataui
+        If Abs(deltataui) < 0.000000000001 Then
+            Exit Do
+        End If
+    Loop     ' note relatively large convergence test as deltataui toggles on ±1.12e-16 for eg 31 N 400000 5000000
+
+     tau = taui
+
+     phi = Math.Atn(tau)
+
+     lambda = atan2(sinhetaP, cosxiP)
+
+    ' ---- convergence: Karney 2011 Eq 26, 27
+
+     p = 1
+     For j = 1 To 6
+        p = p - ((2 * j * beta(j) * Math.Cos(2 * j * xi) * CosH(2 * j * eta)))
+     Next j
+
+     For j = 1 To 6
+        q = q + 2 * j * beta(j) * Math.Sin(2 * j * xi) * SinH(2 * j * eta)
+     Next j
+
+     gammaP = Math.Atn(Math.Tan(xiP) * TanH(etaP))
+     gammaPP = atan2(q, p)
+
+     gamma = gammaP + gammaPP
+
+    ' ---- scale: Karney 2011 Eq 28
+
+     sinphi = Math.Sin(phi)
+     kP = Math.Sqr(1 - e * e * sinphi * sinphi) * Math.Sqr(1 + tau * tau) * Math.Sqr(sinhetaP * sinhetaP + cosxiP * cosxiP)
+     kPP = a_ / a / Math.Sqr(p * p + q * q)
+
+     k = k0 * kP * kPP
+
+    ' ------------
+
+     lambda0 = degreeToRadian((Z - 1) * 6 - 180 + 3) ' longitude of central meridian
+     lambda = lambda + lambda0 ' move lambda from zonal to global coordinates
+
+    ' round to reasonable precision
+     lat = Round(radianToDegree(phi), 11)  ' nm precision (1nm = 10^-11°)
+     lon = Round(radianToDegree(lambda), 11)  ' (strictly lat rounding should be phi·cosphi!)
+     convergence = Round(radianToDegree(gamma), 9)
+     scaleOut = Round(k, 12)
+
+     UTM2LL = Array(lat, lon)
+    ' add the convergence and scale into the LatLon object
+    'latlong.convergence = convergence
+    'latLong.scale = scale
+
+End Function
+
+
+
+
+
+
+
+
+
+Function LL2UTM(LLcoords)
+
+    outStr = ""
+
+
+    lat = LLcoords(0)
+    lon = LLcoords(1)
+
+    'if (!(-80<=lat && lat<=84)) throw new Error('Outside UTM limits')
+
+    outStr = outStr & vbCrLf & "lat long are: " & lat & " " & lon
+    'outStr = outStr & vbCrLf &" are: " &  & " " &
+
+     falseEasting = 500000#
+     falseNorthing = 10000000#
+
+     zone = Int((lon + 180) / 6) + 1 ' longitudinal zone
+     lam0 = degreeToRadian((zone - 1) * 6 - 180 + 3) ' longitude of central meridian
+
+    'outStr = outStr & vbCrLf & "lam0 is: " & lam0
+
+    ' ---- handle Norway/Svalbard exceptions
+    ' grid zones are 8° tall 0°N is offset 10 into latitude bands array
+     mgrsLatBands = "CDEFGHJKLMNPQRSTUVWXX" ' X is repeated for 80-84°N
+     latBand = Mid(mgrsLatBands, Int(lat / 8 + 10), 1)
+    ' adjust zone & central meridian for Norway
+    If (zone = 31 And latBand = "V" And lon >= 3) Then
+        zone = zone + 1
+        lam0 = lam0 + degreeToRadian(6)
+    End If
+    ' adjust zone & central meridian for Svalbard
+    If (zone = 32 And latBand = "X" And lon >= 9) Or (zone = 34 And latBand = "X" And lon >= 21) Or (zone = 36 And latBand = "X" And lon >= 33) Then
+        zone = zone + 1
+        lam0 = lam0 + degreeToRadian(6)
+    End If
+
+    If (zone = 32 And latBand = "X" And lon < 9) Or (zone = 34 And latBand = "X" And lon < 21) Or (zone = 36 And latBand = "X" And lon < 33) Then
+        zone = zone - 1
+        lam0 = lam0 + degreeToRadian(6)
+    End If
+
+
+
+     phi = degreeToRadian(lat)      ' latitude +- from equator
+     lam = degreeToRadian(lon) - lam0 ' longitude +- from central meridian
+
+    outStr = outStr & vbCrLf & "phi, lam are: " & phi & " " & lam
+
+     a = 6378137
+     f = 1 / 298.257223563
+
+     k0 = 0.9996 ' UTM scale on the central meridian
+
+    ' ---- easting, northing: Karney 2011 Eq 7-14, 29, 35:
+
+     e = Math.Sqr(f * (2 - f)) ' eccentricity
+     n = f / (2 - f)        ' 3rd flattening
+     n2 = n * n
+     n3 = n * n2
+     n4 = n * n3
+     n5 = n * n4
+     n6 = n * n5
+
+     coslam = Cos(lam)
+     sinlam = Sin(lam)
+     tanlam = Tan(lam)
+
+     tau = Tan(phi) ' tau = tanphi, tauPri = tanphiPri prime (Pri) indicates angles on the conformal sphere
+     Dim sigma As Double
+     sigma = SinH(e * aTanH(e * tau / Math.Sqr(1# + tau * tau)))
+
+     outStr = outStr & vbCrLf & "sigma tanh #, after tanh #: " & (e * tau / Math.Sqr(1# + tau * tau)) & " , " & TanH(e * tau / Math.Sqr(1# + tau * tau))
+
+     outStr = outStr & vbCrLf & "sigma tau are: " & sigma & " " & tau
+
+     taupri = tau * Math.Sqr(1 + sigma * sigma) - sigma * Math.Sqr(1 + tau * tau)
+
+    'outStr
+     outStr = outStr & vbCrLf & "taupri coslam are: " & taupri & " " & coslam
+
+     xiPri = atan2(CDbl(taupri), CDbl(coslam))
+     etaPri = ASinH(sinlam / Math.Sqr(taupri * taupri + coslam * coslam))
+
+     'outStr
+    outStr = outStr & vbCrLf & "xiPri, etaPri are: " & xiPri & " " & etaPri ' eta, xipri
+
+     a = a / (1 + n) * (1 + 1 / 4 * n2 + 1 / 64 * n4 + 1 / 256 * n6) ' 2pA is the circumference of a meridian
+
+     ' note alpha is one-based array (6th order Kruger expressions)
+     alpha1 = 1 / 2 * n - 2 / 3 * n2 + 5 / 16 * n3 + 41 / 180 * n4 - 127 / 288 * n5 + 7891 / 37800 * n6
+     alpha2 = 13 / 48 * n2 - 3 / 5 * n3 + 557 / 1440 * n4 + 281 / 630 * n5 - 1983433 / 1935360 * n6
+     alpha3 = 61 / 240 * n3 - 103 / 140 * n4 + 15061 / 26880 * n5 + 167603 / 181440 * n6
+     alpha4 = 49561 / 161280 * n4 - 179 / 168 * n5 + 6601661 / 7257600 * n6
+     alpha5 = 34729 / 80640 * n5 - 3418889 / 1995840 * n6
+     alpha6 = 212378941 / 319334400 * n6
+     alpha = Array(Nothing, alpha1, alpha2, alpha3, alpha4, alpha5, alpha6)
+
+     xi = xiPri
+     For j = 1 To 6
+        xi = xi + alpha(j) * Sin(2 * j * xiPri) * CosH(2 * j * etaPri)
+     Next j
+
+     eta = etaPri
+     For j = 1 To 6
+        eta = eta + alpha(j) * Cos(2 * j * xiPri) * SinH(2 * j * etaPri)
+     Next j
+
+
+    outStr = outStr & vbCrLf & "k0, a, eta, xi are: " & k0 & " " & a & " " & eta & " " & xi
+
+     X = k0 * a * eta
+     y = k0 * a * xi
+
+    outStr = outStr & vbCrLf & "initial x, y are: " & X & " " & y
+
+    ' ---- convergence: Karney 2011 Eq 23, 24
+
+     pPri = 1
+     For j = 1 To 6
+        pPri = pPri + 2 * j * alpha(j) * Cos(2 * j * xiPri) * CosH(2 * j * etaPri)
+     Next j
+     qPri = 0
+     For j = 1 To 6
+        qPri = qPri + 2 * j * alpha(j) * Sin(2 * j * xiPri) * SinH(2 * j * etaPri)
+     Next j
+
+     gammaPri = TanH(taupri / Math.Sqr(1 + taupri * taupri) * tanlam)
+     gammaPP = atan2(CDbl(qPri), CDbl(pPri))
+
+     gamma = gammaPri + gammaPP
+
+
+    'outStr = outStr & vbCrLf & "gamma, gammaPri, gammaPP are: " & gamma & " " & gammaPri & " " & gammaPP
+
+    ' ---- scale: Karney 2011 Eq 25
+
+     sinphi = Sin(phi)
+     kPri = Math.Sqr(1 - e * e * sinphi * sinphi) * Math.Sqr(1 + tau * tau) / Math.Sqr(taupri * taupri + coslam * coslam)
+     kPP = a / a * Math.Sqr(pPri * pPri + qPri * qPri)
+
+     k = k0 * kPri * kPP
+
+    ' ------------
+
+    ' shift x/y to false origins
+    X = X + falseEasting             ' make x relative to false easting
+    If (y < 0) Then y = y + falseNorthing  ' make y in southern hemisphere relative to false northing
+
+    X = Round(X, 0)
+    y = Round(y, 0)
+
+    outStr = outStr & vbCrLf & "x,y are: " & X & " " & y
+
+     'convergence = Number(gamma.toDegrees().toFixed(9))
+     'scale = Number(k.toFixed(12))
+
+    If (lat > 0) Then
+        h = "N"
+    Else
+        h = "S"
+    End If
+
+
+    LL2UTM = Array(zone, h, X, y) 'this.datum, convergence, scale)
+
+End Function
+
+
+
+
+Function UTM2MGRS(utmCoords)
+
+    '/**
+    ' * Converts UTM coordinate to MGRS reference.
+    ' *
+    ' * @returns {Mgrs}
+    ' * @throws  {TypeError} Invalid UTM coordinate.
+    ' *
+    ' * @example
+    ' *   const utmCoord = new Utm(31, 'N', 448251, 5411932);
+    ' *   const mgrsRef = utmCoord.toMgrs(); // 31U DQ 48251 11932
+    ' */
+    '// MGRS zone is same as UTM zone
+
+
+    mgrs_e100kLetters = Array("ABCDEFGH", "JKLMNPQ", "STUVWXYZ")
+    mgrs_n100kLetters = Array("ABCDEFGHJKLMNPQRSTUV", "FGHJKLMNPQRSTUVABCDE")
+
+    zone = utmCoords(0)
+    easting = utmCoords(2)
+    northing = utmCoords(3)
+
+    ' const latlong = this.toLatLon();
+    latlong = UTM2LL(utmCoords)
+    lat = latlong(0)
+    lon = latlong(1)
+
+
+    'const band = latBands.charAt(Math.floor(latlong.lat/8+10)); // latitude band
+    band = Mid(mgrs_latBands, Int(lat / 8 + 11), 1)
+
+    col = Int(easting / 100000#)
+    'const e100k = e100kLetters[(zone-1)%3].charAt(col-1);
+    e100k = Mid(mgrs_e100kLetters((zone - 1) Mod 3), col, 1)
+
+    'const row = Math.floor(this.northing / 100e3) % 20;
+    'const n100k = n100kLetters[(zone-1)%2].charAt(row);
+    row = Int(northing / 100000#) Mod 20
+    n100k = Mid(mgrs_n100kLetters((zone - 1) Mod 2), row + 1, 1)
+
+    '// truncate easting/northing to within 100km grid square
+    easting = easting Mod 100000#
+    northing = northing Mod 100000#
+
+    '// round to nm precision
+    'easting = Number(easting.toFixed(6));
+    'northing = Number(northing.toFixed(6));
+    easting = easting - easting Mod 1
+    northing = northing - northing Mod 1
+
+    UTM2MGRS = Array(zone, band, e100k, n100k, easting, northing)
+
+End Function
+
+
+
+
+
+
+
+
+
+
+
+
+
+Function degreeToRadian(deg)
+    degreeToRadian = deg * PI / 180
+End Function
+
+Function radianToDegree(rad)
+    radianToDegree = rad * (180 / PI)
+End Function
+
+'Good source for the hyperbolic functions: https://docs.microsoft.com/en-us/dotnet/visual-basic/language-reference/keywords/derived-math-functions
+Function SinH(value) As Double
+    Dim temp As Double
+    temp = Exp(value)
+    SinH = (temp - 1 / temp) / 2
+End Function
+Function ASinH(X) As Double
+    ASinH = Log(X + Math.Sqr(X * X + 1))
+End Function
+Function CosH(value) As Double
+    Dim temp As Double
+    temp = Exp(value)
+    CosH = (temp + 1 / temp) / 2
+End Function
+Function TanH(value) As Double
+    Dim temp As Double
+    temp = Exp(value)
+    TanH = (temp - 1 / temp) / (temp + 1 / temp)
+End Function
+Function aTanH(X)
+    aTanH = Log((1 + X) / (1 - X)) / 2
+End Function
+
+
+
+Function atan2(y, X)
+    If (X > 0) Then
+        atan2 = Math.Atn(y / X): Exit Function
+    ElseIf (y > 0) Then
+        atan2 = PI - Math.Atn(X / y): Exit Function
+    ElseIf (y < 0) Then
+        atan2 = -PI - Math.Atn(X / y): Exit Function
+    ElseIf (X < 0) Then
+        atan2 = Math.Atn(y / X) + PI: Exit Function
+    End If
+End Function
